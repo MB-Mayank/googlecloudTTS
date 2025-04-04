@@ -1,0 +1,10 @@
+runtime: nodejs22  # Or nodejs20 depending on your Node.js version
+
+env_variables:
+  PORT: 8080
+
+# Optional automatic scaling configuration
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  min_idle_instances: 1
