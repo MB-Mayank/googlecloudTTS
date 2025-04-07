@@ -2,18 +2,18 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { WebSocketServer } from 'ws';
-import { v1 as textToSpeech } from '@google-cloud/text-to-speech';
+import { v1beta1 as textToSpeechBeta } from '@google-cloud/text-to-speech';
 
 const app = express();
 const port = process.env.PORT || 3001;
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Middleware - only apply where needed
+// Middleware
 app.use(cors());
 
-// Create a single global client instance
-const textToSpeechClient = new textToSpeech.TextToSpeechClient();
+// Create text-to-speech client using beta API for streaming
+const textToSpeechClient = new textToSpeechBeta.TextToSpeechClient();
 
 // Optional: Cache for frequently used text/responses
 const audioCache = new Map();
@@ -50,7 +50,14 @@ wss.on('connection', (ws) => {
             cached: true
           }));
           
-          ws.send(audioCache.get(cacheKey));
+          // Send the cached audio with a sequence number for ordering
+          const cachedAudio = audioCache.get(cacheKey);
+          ws.send(JSON.stringify({
+            type: 'audio-chunk',
+            sequenceNumber: 0,
+            isLastChunk: true
+          }));
+          ws.send(cachedAudio);
           ws.send(JSON.stringify({ type: 'audio-complete' }));
           return;
         }
@@ -67,21 +74,35 @@ wss.on('connection', (ws) => {
           
           // Collect audio chunks for caching
           const audioChunks = [];
+          let sequenceNumber = 0;
           
           // Handle streaming response data
           stream.on('data', (response) => {
             if (response.audioContent) {
-              // Send audio chunk to client
+              // Send audio chunk with sequence information
+              ws.send(JSON.stringify({
+                type: 'audio-chunk',
+                sequenceNumber: sequenceNumber,
+                isLastChunk: false
+              }));
+              
+              // Send the actual audio data
               ws.send(response.audioContent);
               
               // Store for caching
               audioChunks.push(response.audioContent);
+              sequenceNumber++;
             }
           });
           
           // Handle end of stream
           stream.on('end', () => {
             // Signal that audio streaming is complete
+            ws.send(JSON.stringify({ 
+              type: 'audio-chunk',
+              sequenceNumber: sequenceNumber,
+              isLastChunk: true
+            }));
             ws.send(JSON.stringify({ type: 'audio-complete' }));
             
             // Cache the complete audio if needed
